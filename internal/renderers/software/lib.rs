@@ -25,6 +25,12 @@ mod scene;
 
 use self::fonts::GlyphRenderer;
 pub use self::minimal_software_window::MinimalSoftwareWindow;
+
+/// Forget the bitmap fonts registered so far, before showing a component that brings its own.
+/// A font registered later only takes the place of an earlier one of the same family once
+/// the earlier one is gone.
+#[doc(hidden)]
+pub use self::fonts::clear_registered_bitmap_fonts;
 use self::scene::*;
 use alloc::rc::{Rc, Weak};
 use alloc::vec::Vec;

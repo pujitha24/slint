@@ -240,6 +240,11 @@ pub fn register_bitmap_font(font_data: &'static BitmapFont) {
     })
 }
 
+/// Forget all the registered bitmap fonts, so that the fonts registered next take their place.
+pub fn clear_registered_bitmap_fonts() {
+    BITMAP_FONTS.with(|fonts| fonts.borrow_mut().clear())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
