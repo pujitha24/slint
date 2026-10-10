@@ -1200,6 +1200,13 @@ const _: () = {
 };
 
 impl CompilationResultSend {
+    /// This is an internal constant without API stability guarantees.
+    /// Identifies the format of [`Self::to_bytes()`]: [`Self::from_bytes()`] only reads bytes
+    /// written with the same one.
+    #[doc(hidden)]
+    #[cfg(feature = "internal-serde")]
+    pub const FORMAT_ID: u64 = i_slint_compiler::llr::serialize::FORMAT_ID;
+
     /// This is an internal function without API stability guarantees.
     /// The compilation unit, serialized for [`Self::from_bytes()`].
     /// Fails if the compilation produced no unit.

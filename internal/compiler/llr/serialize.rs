@@ -23,6 +23,12 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smol_str::SmolStr;
 
+/// Identifies the serialized format: a unit deserializes only with the same `FORMAT_ID`.
+///
+/// It's a hash of the sources of the serialized types, so any change to them changes it,
+/// comments included.
+pub const FORMAT_ID: u64 = include!(concat!(env!("OUT_DIR"), "/format_id.rs"));
+
 /// Serializes `unit` for [`from_bytes()`].
 pub fn to_bytes(unit: &CompilationUnit) -> postcard::Result<Vec<u8>> {
     postcard::to_allocvec(&(NativeClasses::of(unit), unit))
