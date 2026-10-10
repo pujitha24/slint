@@ -123,6 +123,7 @@ mod item_tree_vtable;
 pub mod json;
 mod popup;
 mod public_api;
+mod static_resources;
 mod value_model;
 
 #[doc(inline)]

@@ -46,6 +46,16 @@ anyrender = [
 # Additionally render cases with everything pre-rendered at compile time: bitmap fonts and
 # pre-decoded textures (the MCU-style `EmbedTextures` path).
 software-embed-assets = ["software"]
+# Render the embed-assets cases through the interpreter too, after sending the compiled unit
+# through `CompilationResultSend::to_bytes()`, as a microcontroller receives it. Compares against
+# the `software_embed_assets` references.
+interpreter-embed-assets = [
+  "software",
+  "dep:slint-interpreter",
+  "slint-interpreter/internal",
+  "slint-interpreter/internal-serde",
+  "slint-interpreter/internal-embed-textures",
+]
 
 [dependencies]
 slint = { workspace = true, features = ["std", "compat-1-2"], optional = true }

@@ -190,6 +190,11 @@ internal-json = ["std", "dep:serde_json"]
 # NOTE: this is not a semver compatible feature
 internal-serde = ["internal", "i-slint-compiler/serde"]
 
+# (internal) Let the compiler pre-render images and fonts for the software renderer
+# (`EmbedResourcesKind::EmbedTextures`), for a device that can't decode or rasterize them.
+# NOTE: this is not a semver compatible feature
+internal-embed-textures = ["compiler", "i-slint-compiler/renderer-software"]
+
 
 [dependencies]
 i-slint-compiler = { workspace = true }

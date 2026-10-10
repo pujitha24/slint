@@ -407,6 +407,7 @@ impl Instance {
         // `pre_init_code` and image decoding need the renderer's Slint context
         // before `attach_to_window` runs `set_component` on show.
         adapter.renderer().set_window_adapter(&adapter);
+        apply_const_scale_factor(&self.root_sub_component.compilation_unit, &adapter);
         // A freshly created adapter belongs to the outermost root instance;
         // caching it only on a sub-tree would leave the root creating a
         // second one later, splitting the tree across two windows.
@@ -744,6 +745,7 @@ impl Instance {
             disable_window_attachment,
         );
         if let Some(adapter) = window_adapter {
+            apply_const_scale_factor(&compilation_unit, &adapter);
             let _ = vrc.window_adapter.set(adapter);
         }
         // Set the outer-tree handle before finalizing so bindings that
@@ -1475,4 +1477,12 @@ fn value_to_flexbox_layout_item_info(
         return info.into();
     };
     crate::eval_layout::flexbox_item_info_from_struct(&s)
+}
+
+/// Give the window the scale factor the unit's textures and fonts were rendered for.
+fn apply_const_scale_factor(unit: &CompilationUnit, adapter: &WindowAdapterRc) {
+    if let Some(factor) = unit.const_scale_factor {
+        i_slint_core::window::WindowInner::from_pub(adapter.window())
+            .set_const_scale_factor(factor);
+    }
 }
