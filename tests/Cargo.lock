@@ -4835,6 +4835,8 @@ name = "slint-interpreter"
 version = "1.19.0"
 dependencies = [
  "derive_more",
+ "either",
+ "hashbrown 0.16.1",
  "i-slint-backend-linuxkms",
  "i-slint-backend-selector",
  "i-slint-backend-winit",
@@ -4842,8 +4844,9 @@ dependencies = [
  "i-slint-compiler",
  "i-slint-core",
  "i-slint-core-macros",
- "itertools 0.15.0",
  "lyon_path",
+ "num-traits",
+ "once_cell",
  "smol_str 0.3.6",
  "typed-index-collections",
  "vtable",

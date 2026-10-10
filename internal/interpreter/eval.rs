@@ -7,14 +7,18 @@
 //! layout info expressions and `init_code` blocks.
 //! Resolves `MemberReference`s by walking the sub-component parent chain.
 
+use crate::HashMap;
 use crate::Value;
 use crate::globals::{GlobalInstance, GlobalStorage};
 use crate::instance::SubComponentInstance;
+use crate::prelude::*;
+use alloc::rc::{Rc, Weak};
+use core::pin::Pin;
 use i_slint_compiler::builtin_functions::BuiltinFunction;
-use i_slint_compiler::diagnostics::SourceLocation;
 use i_slint_compiler::expression_types::MinMaxOp;
 use i_slint_compiler::langtype::{ConstantExpression, Type};
 use i_slint_compiler::llr::{self, Expression, LocalMemberIndex, MemberReference};
+#[cfg(feature = "compiler")]
 use i_slint_compiler::source_path::SourcePath;
 use i_slint_core::graphics::{
     Brush, ConicGradientBrush, GradientStop, LinearGradientBrush, RadialGradientBrush,
@@ -22,10 +26,9 @@ use i_slint_core::graphics::{
 use i_slint_core::item_tree::ItemRc;
 use i_slint_core::model::{Model, ModelExt, ModelRc, SharedVectorModel};
 use i_slint_core::{Color, SharedString, SharedVector, SlintContext};
+#[cfg(not(feature = "std"))]
+use num_traits::Float as _;
 use smol_str::SmolStr;
-use std::collections::HashMap;
-use std::pin::Pin;
-use std::rc::{Rc, Weak};
 
 /// Dynamic context for one expression evaluation.
 pub struct EvalContext {
@@ -822,8 +825,8 @@ pub fn eval_expression(ctx: &mut EvalContext, expression: &Expression) -> Value 
             }
             v
         }
-        Expression::BuiltinFunctionCall { function, arguments, source_location } => {
-            call_builtin_function(ctx, function.clone(), arguments, source_location)
+        Expression::BuiltinFunctionCall { function, arguments, .. } => {
+            call_builtin_function(ctx, function.clone(), arguments, expression)
         }
         Expression::CallBackCall { callback, arguments } => {
             let args: Vec<Value> = arguments.iter().map(|e| eval_expression(ctx, e)).collect();
@@ -855,11 +858,11 @@ pub fn eval_expression(ctx: &mut EvalContext, expression: &Expression) -> Value 
                         .iter_enumerated()
                         .find(|(_, p)| p.name.as_str() == "model_index")
                         .map(|(idx, _)| {
-                            let v = std::pin::Pin::as_ref(&walker.properties[idx]).get();
+                            let v = core::pin::Pin::as_ref(&walker.properties[idx]).get();
                             f64::try_from(v).unwrap_or(0.) as usize
                         })
                         .unwrap_or(0);
-                    let parent_pinned = std::pin::Pin::new(parent);
+                    let parent_pinned = core::pin::Pin::new(parent);
                     let repeater = &parent_pinned.repeaters[*repeater_idx];
                     repeater.model_set_row_data(row, new_value);
                 }
@@ -1123,7 +1126,7 @@ pub fn eval_expression(ctx: &mut EvalContext, expression: &Expression) -> Value 
 fn with_layout_item_info(
     ctx: &mut EvalContext,
     cells_variable: &str,
-    elements: &[itertools::Either<Expression, i_slint_compiler::llr::LayoutRepeatedElement>],
+    elements: &[either::Either<Expression, i_slint_compiler::llr::LayoutRepeatedElement>],
     orientation: i_slint_compiler::expression_types::Orientation,
     repeated_cross_size: Option<&Expression>,
     sub_expression: &Expression,
@@ -1139,8 +1142,8 @@ fn with_layout_item_info(
     let mut repeater_steps: Vec<u32> = Vec::new();
     for el in elements {
         match el {
-            itertools::Either::Left(expr) => cells.push(eval_expression(ctx, expr)),
-            itertools::Either::Right(repeater) => {
+            either::Either::Left(expr) => cells.push(eval_expression(ctx, expr)),
+            either::Either::Right(repeater) => {
                 let offset = cells.len() as u32;
                 let (instances, step) = push_repeater_layout_items(
                     ctx,
@@ -1290,7 +1293,7 @@ fn eval_grid_measure_width(ctx: &mut EvalContext, expr: &Expression, index: usiz
 }
 
 fn total_row_child_count(
-    sub: &Pin<std::rc::Rc<crate::instance::SubComponentInstance>>,
+    sub: &Pin<alloc::rc::Rc<crate::instance::SubComponentInstance>>,
     templates: &[i_slint_compiler::llr::RowChildTemplateInfo],
 ) -> usize {
     use i_slint_compiler::llr::{RowChildTemplateInfo, static_child_count};
@@ -1323,7 +1326,7 @@ fn with_flexbox_layout_item_info(
     cells_h_variable: &str,
     cells_v_variable: &str,
     flex_props_variable: Option<&str>,
-    elements: &[itertools::Either<
+    elements: &[either::Either<
         (Expression, Expression, Expression),
         i_slint_compiler::llr::LayoutRepeatedElement,
     >],
@@ -1340,7 +1343,7 @@ fn with_flexbox_layout_item_info(
     let mut repeated_indices: Vec<u32> = Vec::new();
     for el in elements {
         match el {
-            itertools::Either::Left((h, v, props)) => {
+            either::Either::Left((h, v, props)) => {
                 cells_h.push(eval_expression(ctx, h));
                 cells_v.push(eval_expression(ctx, v));
                 // With no flex-props variable the sub-expression only reads the
@@ -1350,7 +1353,7 @@ fn with_flexbox_layout_item_info(
                     flex_props.push(eval_expression(ctx, props));
                 }
             }
-            itertools::Either::Right(repeater) => {
+            either::Either::Right(repeater) => {
                 let offset = cells_h.len() as u32;
                 let instances = push_repeater_flexbox_items(
                     ctx,
@@ -1455,7 +1458,7 @@ fn flex_props_to_value(props: i_slint_core::layout::FlexItemProps) -> Value {
 fn with_grid_input_data(
     ctx: &mut EvalContext,
     cells_variable: &str,
-    elements: &[itertools::Either<Expression, i_slint_compiler::llr::GridLayoutRepeatedElement>],
+    elements: &[either::Either<Expression, i_slint_compiler::llr::GridLayoutRepeatedElement>],
     sub_expression: &Expression,
 ) -> Value {
     // `repeated_indices` holds `(offset, len)` pairs into `cells`,
@@ -1471,8 +1474,8 @@ fn with_grid_input_data(
 
     for el in elements {
         match el {
-            itertools::Either::Left(expr) => cells.push(eval_expression(ctx, expr)),
-            itertools::Either::Right(repeater) => {
+            either::Either::Left(expr) => cells.push(eval_expression(ctx, expr)),
+            either::Either::Right(repeater) => {
                 ctx.locals.insert(SmolStr::new_static("new_row"), Value::Bool(repeater.new_row));
                 let offset = cells.len() as u32;
                 let is_row_repeater = repeater.row_child_templates.is_some();
@@ -1532,9 +1535,9 @@ fn push_repeater_grid_input_data(
     row_child_templates: Option<&[i_slint_compiler::llr::RowChildTemplateInfo]>,
     cells: &mut Vec<Value>,
 ) -> (u32, u32) {
+    use alloc::rc::Rc;
     use i_slint_compiler::llr::RowChildTemplateInfo;
     use i_slint_core::model::VecModel;
-    use std::rc::Rc;
     let Some(current) = ctx.current.as_ref() else { return (0, 0) };
     let repeater = &current.repeaters[repeater_idx];
     repeater.track_instance_changes();
@@ -1779,14 +1782,16 @@ fn load_image_reference(
     resource_ref: &i_slint_compiler::expression_types::ImageReference,
 ) -> i_slint_core::graphics::Image {
     use i_slint_compiler::expression_types::ImageReference as Ref;
-    let image = match resource_ref {
+    let image: Result<_, i_slint_core::graphics::LoadImageError> = match resource_ref {
         Ref::None => Ok(Default::default()),
+        #[cfg(feature = "compiler")]
         Ref::DataUri(data_uri) => i_slint_compiler::data_uri::decode_data_uri(data_uri)
             .ok()
             .and_then(|(data, extension)| {
                 i_slint_core::graphics::load_image_from_data_uri(data_uri, &data, &extension).ok()
             })
             .ok_or_else(Default::default),
+        #[cfg(feature = "compiler")]
         Ref::Source(path @ SourcePath::Builtin(builtin_path)) => {
             // Style-bundled resources (e.g. cosmic/material widget icons) are
             // baked into the compiler's builtin library.
@@ -1800,7 +1805,9 @@ fn load_image_reference(
                 })
                 .ok_or_else(Default::default)
         }
+        #[cfg(feature = "compiler")]
         Ref::Source(SourcePath::File(path)) => i_slint_core::graphics::Image::load_from_path(path),
+        #[cfg(feature = "compiler")]
         Ref::Source(url) => {
             #[cfg(target_arch = "wasm32")]
             {
@@ -1813,10 +1820,13 @@ fn load_image_reference(
                 Err(Default::default())
             }
         }
+        // Without the compiler, only the images it embedded in the unit show
+        #[cfg(not(feature = "compiler"))]
+        Ref::DataUri(_) | Ref::Source(_) => Err(Default::default()),
         Ref::EmbeddedData { .. } | Ref::EmbeddedTexture { .. } => Ok(Default::default()),
     };
     image.unwrap_or_else(|_| {
-        eprintln!("Could not load image {resource_ref:?}");
+        i_slint_core::debug_log!("Could not load image {resource_ref:?}");
         Default::default()
     })
 }
@@ -1894,7 +1904,7 @@ fn grid_repeater_cache_access(
 /// The location of a builtin function call in the .slint source, which the log
 /// messages it emits borrow through [`LogLocation::get`].
 struct LogLocation<'a> {
-    path: std::borrow::Cow<'a, str>,
+    path: alloc::borrow::Cow<'a, str>,
     line: usize,
     column: usize,
 }
@@ -1909,7 +1919,10 @@ impl LogLocation<'_> {
     }
 }
 
-fn log_message_location(source_location: &Option<SourceLocation>) -> Option<LogLocation<'_>> {
+/// The location of the builtin function call `call`. A unit compiled elsewhere has none.
+#[cfg(feature = "compiler")]
+fn log_message_location(call: &Expression) -> Option<LogLocation<'_>> {
+    let Expression::BuiltinFunctionCall { source_location, .. } = call else { return None };
     let location = source_location.as_ref()?;
     let source_file = location.source_file.as_ref()?;
     let (line, column) = source_file
@@ -1919,6 +1932,11 @@ fn log_message_location(source_location: &Option<SourceLocation>) -> Option<LogL
         path => path.to_string().into(),
     };
     Some(LogLocation { path, line, column })
+}
+
+#[cfg(not(feature = "compiler"))]
+fn log_message_location(_call: &Expression) -> Option<LogLocation<'_>> {
+    None
 }
 
 /// Arguments of a `@tr(...)` formatting, as a model of strings.
@@ -2029,7 +2047,7 @@ fn call_builtin_function(
     ctx: &mut EvalContext,
     f: BuiltinFunction,
     arguments: &[Expression],
-    source_location: &Option<SourceLocation>,
+    call: &Expression,
 ) -> Value {
     let to_string = |ctx: &mut EvalContext, e: &Expression| -> SharedString {
         eval_expression(ctx, e).try_into().unwrap_or_default()
@@ -2073,7 +2091,7 @@ fn call_builtin_function(
             i_slint_core::model::report_model_error(
                 &component_context(ctx),
                 "push",
-                log_message_location(source_location).as_ref().map(LogLocation::get),
+                log_message_location(call).as_ref().map(LogLocation::get),
                 model.push_row(value),
             );
 
@@ -2100,7 +2118,7 @@ fn call_builtin_function(
             i_slint_core::model::report_model_error(
                 &component_context(ctx),
                 "remove",
-                log_message_location(source_location).as_ref().map(LogLocation::get),
+                log_message_location(call).as_ref().map(LogLocation::get),
                 result,
             );
 
@@ -2129,7 +2147,7 @@ fn call_builtin_function(
             i_slint_core::model::report_model_error(
                 &component_context(ctx),
                 "insert",
-                log_message_location(source_location).as_ref().map(LogLocation::get),
+                log_message_location(call).as_ref().map(LogLocation::get),
                 result,
             );
 
@@ -2233,17 +2251,21 @@ fn call_builtin_function(
         }
         BuiltinFunction::RegisterCustomFontByPath => {
             if let Value::String(s) = eval_expression(ctx, &arguments[0])
-                && let Some(root) = find_root_instance(ctx)
+                && let Some(_root) = find_root_instance(ctx)
             {
                 // Log and skip if the window adapter can't be created; the
                 // same error resurfaces when the window is actually used.
+                #[cfg(feature = "std")]
                 let result =
-                    root.try_window_adapter().map_err(|e| e.to_string()).and_then(|adapter| {
+                    _root.try_window_adapter().map_err(|e| e.to_string()).and_then(|adapter| {
                         adapter
                             .renderer()
                             .register_font_from_path(&std::path::PathBuf::from(s.as_str()))
                             .map_err(|e| format!("Cannot load custom font {}: {e}", s.as_str()))
                     });
+                #[cfg(not(feature = "std"))]
+                let result: Result<(), String> =
+                    Err(format!("Cannot load custom font {} without a file system", s.as_str()));
                 if let Err(err) = result {
                     i_slint_core::debug_log!("{err}");
                 }
@@ -2308,7 +2330,7 @@ fn call_builtin_function(
             let msg = to_string(ctx, &arguments[0]);
             component_context(ctx).dispatch_log_message(LogMessage::new(
                 LogMessageSource::SlintCode,
-                log_message_location(source_location).as_ref().map(LogLocation::get),
+                log_message_location(call).as_ref().map(LogLocation::get),
                 format_args!("{msg}"),
             ));
             Value::Void

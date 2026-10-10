@@ -2,13 +2,22 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 // cSpell: ignore theproperty underscoresanddashespreserved xreadonly
+use crate::HashMap;
+use crate::prelude::*;
+#[cfg(any(test, feature = "compiler"))]
+use alloc::rc::Rc;
+#[cfg(test)]
+use alloc::sync::Arc;
+use core::future::Future;
+use core::time::Duration;
 use i_slint_compiler::langtype::Type as LangType;
+#[cfg(any(feature = "compiler", feature = "internal"))]
 use i_slint_compiler::source_path::SourcePath;
 use i_slint_core::Coord;
-use i_slint_core::PathData;
 use i_slint_core::component_factory::ComponentFactory;
 #[cfg(feature = "internal")]
 use i_slint_core::component_factory::FactoryContext;
+use i_slint_core::graphics::PathData;
 use i_slint_core::graphics::euclid::approxeq::ApproxEq as _;
 use i_slint_core::items::*;
 use i_slint_core::model::{Model, ModelExt, ModelRc};
@@ -16,14 +25,10 @@ use i_slint_core::styled_text::StyledText;
 #[cfg(feature = "internal")]
 use i_slint_core::window::WindowInner;
 use smol_str::SmolStr;
-use std::collections::HashMap;
-use std::future::Future;
+#[cfg(feature = "compiler")]
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
-#[cfg(test)]
-use std::sync::Arc;
-use std::time::Duration;
 
+#[cfg(feature = "compiler")]
 #[doc(inline)]
 pub use i_slint_compiler::diagnostics::{Diagnostic, DiagnosticLevel};
 
@@ -32,6 +37,7 @@ pub use i_slint_core::api::*;
 
 /// Argument of [`Compiler::set_default_translation_context()`]
 ///
+#[cfg(feature = "compiler")]
 pub use i_slint_compiler::DefaultTranslationContext;
 
 /// This enum represents the different public variants of the [`Value`] enum, without
@@ -209,8 +215,8 @@ impl PartialEq for Value {
     }
 }
 
-impl std::fmt::Debug for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Value {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Value::Void => write!(f, "Value::Void"),
             Value::Number(n) => write!(f, "Value::Number({n:?})"),
@@ -374,7 +380,7 @@ macro_rules! declare_value_enum_conversion {
         impl TryFrom<Value> for i_slint_core::items::$Name {
             type Error = ();
             fn try_from(v: Value) -> Result<i_slint_core::items::$Name, ()> {
-                use std::str::FromStr;
+                use core::str::FromStr;
                 match v {
                     Value::EnumerationValue(enumeration, value) => {
                         if enumeration != stringify!($Name) {
@@ -535,7 +541,7 @@ fn value_model_conversion() {
 }
 
 pub(crate) fn normalize_identifier(ident: &str) -> SmolStr {
-    i_slint_compiler::parser::normalize_identifier(ident)
+    i_slint_compiler::names::normalize_identifier(ident)
 }
 
 /// This type represents a runtime instance of structure in `.slint`.
@@ -564,7 +570,7 @@ pub struct Struct(pub(crate) HashMap<SmolStr, Value>);
 impl Struct {
     /// Get the value for a given struct field
     pub fn get_field(&self, name: &str) -> Option<&Value> {
-        if i_slint_compiler::parser::is_identifier_normalized(name) {
+        if i_slint_compiler::names::is_identifier_normalized(name) {
             self.0.get(name)
         } else {
             self.0.get(&*normalize_identifier(name))
@@ -599,6 +605,7 @@ fn struct_field_name_normalization() {
     assert_eq!(s.get_field("cross_axis_self_alignment"), Some(&Value::Number(2.)));
 }
 
+#[cfg(feature = "compiler")]
 /// ComponentCompiler is deprecated, use [`Compiler`] instead
 #[deprecated(note = "Use slint_interpreter::Compiler instead")]
 pub struct ComponentCompiler {
@@ -607,6 +614,7 @@ pub struct ComponentCompiler {
     diagnostics: Vec<Diagnostic>,
 }
 
+#[cfg(feature = "compiler")]
 #[allow(deprecated)]
 impl Default for ComponentCompiler {
     fn default() -> Self {
@@ -618,6 +626,7 @@ impl Default for ComponentCompiler {
     }
 }
 
+#[cfg(feature = "compiler")]
 #[allow(deprecated)]
 impl ComponentCompiler {
     /// Returns a new ComponentCompiler.
@@ -808,6 +817,7 @@ impl ComponentCompiler {
     }
 }
 
+#[cfg(feature = "compiler")]
 /// This is the entry point of the crate, it can be used to load a `.slint` file and
 /// compile it into a [`CompilationResult`].
 pub struct Compiler {
@@ -816,6 +826,7 @@ pub struct Compiler {
     reads_project_file: bool,
 }
 
+#[cfg(feature = "compiler")]
 impl Default for Compiler {
     fn default() -> Self {
         let config = i_slint_compiler::CompilerConfiguration::new(
@@ -825,6 +836,7 @@ impl Default for Compiler {
     }
 }
 
+#[cfg(feature = "compiler")]
 impl Compiler {
     /// Returns a new Compiler.
     pub fn new() -> Self {
@@ -1060,6 +1072,7 @@ impl Compiler {
     }
 }
 
+#[cfg(feature = "compiler")]
 pub(crate) enum AnimationMode {
     /// In static mode, all timers & animations are disabled.
     /// The item tree should not update anything without interaction.
@@ -1068,6 +1081,7 @@ pub(crate) enum AnimationMode {
     Running,
 }
 
+#[cfg(feature = "compiler")]
 /// Compiles `source_code` with `project_file` applied to `config`, and `overrides` on top.
 async fn build_with_project_file(
     source_code: String,
@@ -1082,6 +1096,7 @@ async fn build_with_project_file(
         .await
 }
 
+#[cfg(feature = "compiler")]
 /// Like [`build_with_project_file`], with the project file found for the directory of `path`.
 async fn build_with_found_project_file(
     source_code: String,
@@ -1099,6 +1114,7 @@ async fn build_with_found_project_file(
     }
 }
 
+#[cfg(feature = "compiler")]
 /// The result of a compilation that failed because the project file couldn't be read.
 #[cfg_attr(not(feature = "internal"), allow(unused_variables))]
 fn project_file_error(message: String, path: &Path) -> CompilationResult {
@@ -1114,6 +1130,7 @@ fn project_file_error(message: String, path: &Path) -> CompilationResult {
     }
 }
 
+#[cfg(feature = "compiler")]
 async fn build_compilation_result(
     source_code: String,
     path: SourcePath,
@@ -1125,7 +1142,7 @@ async fn build_compilation_result(
     let components = result
         .components
         .into_iter()
-        .map(|(name, def)| (name, ComponentDefinition { inner: std::rc::Rc::new(def) }))
+        .map(|(name, def)| (name, ComponentDefinition { inner: alloc::rc::Rc::new(def) }))
         .collect::<HashMap<String, ComponentDefinition>>();
     CompilationResult {
         components,
@@ -1164,6 +1181,7 @@ pub struct CompilationResultSend {
     compilation_unit: Option<i_slint_compiler::llr::CompilationUnit>,
     /// The index of each component within the unit, by name.
     components: HashMap<String, i_slint_compiler::llr::PublicComponentIdx>,
+    #[cfg(feature = "compiler")]
     diagnostics: Vec<Diagnostic>,
     #[cfg(feature = "internal")]
     watch_paths: Vec<SourcePath>,
@@ -1185,7 +1203,7 @@ impl CompilationResultSend {
     pub fn to_bytes(&self, _: i_slint_core::InternalToken) -> Result<Vec<u8>, String> {
         let unit = self.compilation_unit.as_ref().ok_or("The compilation produced no unit")?;
         i_slint_compiler::llr::serialize::to_bytes(unit)
-            .map_err(|err| std::format!("Cannot serialize the compilation unit: {err}"))
+            .map_err(|err| alloc::format!("Cannot serialize the compilation unit: {err}"))
     }
 
     /// This is an internal function without API stability guarantees.
@@ -1195,7 +1213,7 @@ impl CompilationResultSend {
     #[cfg(feature = "internal-serde")]
     pub fn from_bytes(bytes: &[u8], _: i_slint_core::InternalToken) -> Result<Self, String> {
         let unit = i_slint_compiler::llr::serialize::from_bytes(bytes)
-            .map_err(|err| std::format!("Cannot read the compilation unit: {err}"))?;
+            .map_err(|err| alloc::format!("Cannot read the compilation unit: {err}"))?;
         let components = unit
             .public_components
             .iter_enumerated()
@@ -1204,6 +1222,7 @@ impl CompilationResultSend {
         Ok(Self {
             compilation_unit: Some(unit),
             components,
+            #[cfg(feature = "compiler")]
             diagnostics: Vec::new(),
             watch_paths: Vec::new(),
             structs_and_enums: Vec::new(),
@@ -1211,11 +1230,13 @@ impl CompilationResultSend {
     }
 
     /// Returns true if the compilation failed.
+    #[cfg(feature = "compiler")]
     pub fn has_errors(&self) -> bool {
         self.diagnostics.iter().any(|d| d.level() == DiagnosticLevel::Error)
     }
 
     /// The diagnostics (errors and warnings) the compilation produced.
+    #[cfg(feature = "compiler")]
     pub fn diagnostics(&self) -> impl Iterator<Item = Diagnostic> + '_ {
         self.diagnostics.iter().cloned()
     }
@@ -1232,17 +1253,18 @@ impl From<CompilationResultSend> for CompilationResult {
         let CompilationResultSend {
             compilation_unit,
             components,
+            #[cfg(feature = "compiler")]
             diagnostics,
             #[cfg(feature = "internal")]
             watch_paths,
             #[cfg(feature = "internal")]
             structs_and_enums,
         } = sent;
-        let compilation_unit = compilation_unit.map(std::rc::Rc::new);
+        let compilation_unit = compilation_unit.map(alloc::rc::Rc::new);
         let components = components
             .into_iter()
             .filter_map(|(name, public_index)| {
-                let inner = std::rc::Rc::new(crate::component::ComponentDefinitionInner {
+                let inner = alloc::rc::Rc::new(crate::component::ComponentDefinitionInner {
                     compilation_unit: compilation_unit.clone()?,
                     public_index,
                     type_loaders: Default::default(),
@@ -1252,6 +1274,7 @@ impl From<CompilationResultSend> for CompilationResult {
             .collect();
         Self {
             components,
+            #[cfg(feature = "compiler")]
             diagnostics,
             #[cfg(feature = "internal")]
             watch_paths,
@@ -1270,6 +1293,7 @@ impl From<CompilationResultSend> for CompilationResult {
 #[derive(Clone)]
 pub struct CompilationResult {
     pub(crate) components: HashMap<String, ComponentDefinition>,
+    #[cfg(feature = "compiler")]
     pub(crate) diagnostics: Vec<Diagnostic>,
     #[cfg(feature = "internal")]
     pub(crate) watch_paths: Vec<SourcePath>,
@@ -1278,17 +1302,19 @@ pub struct CompilationResult {
 }
 
 impl core::fmt::Debug for CompilationResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CompilationResult")
-            .field("components", &self.components.keys())
-            .field("diagnostics", &self.diagnostics)
-            .finish()
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut f = f.debug_struct("CompilationResult");
+        f.field("components", &self.components.keys());
+        #[cfg(feature = "compiler")]
+        f.field("diagnostics", &self.diagnostics);
+        f.finish()
     }
 }
 
 impl CompilationResult {
     /// Returns true if the compilation failed.
     /// The errors can be retrieved using the [`Self::diagnostics()`] function.
+    #[cfg(feature = "compiler")]
     pub fn has_errors(&self) -> bool {
         self.diagnostics().any(|diag| diag.level() == DiagnosticLevel::Error)
     }
@@ -1296,6 +1322,7 @@ impl CompilationResult {
     /// Return an iterator over the diagnostics.
     ///
     /// You can also call [`Self::print_diagnostics()`] to output the diagnostics to stderr
+    #[cfg(feature = "compiler")]
     pub fn diagnostics(&self) -> impl Iterator<Item = Diagnostic> + '_ {
         self.diagnostics.iter().cloned()
     }
@@ -1319,6 +1346,7 @@ impl CompilationResult {
     pub fn into_send(self) -> CompilationResultSend {
         let Self {
             components,
+            #[cfg(feature = "compiler")]
             diagnostics,
             #[cfg(feature = "internal")]
             watch_paths,
@@ -1327,14 +1355,14 @@ impl CompilationResult {
         } = self;
 
         // Every definition of one result was built from the same unit.
-        let mut unit = None::<std::rc::Rc<i_slint_compiler::llr::CompilationUnit>>;
+        let mut unit = None::<alloc::rc::Rc<i_slint_compiler::llr::CompilationUnit>>;
         let components = components
             .into_iter()
             .map(|(name, definition)| {
                 let public_index = definition.inner.public_index;
                 match &unit {
                     Some(u) => {
-                        debug_assert!(std::rc::Rc::ptr_eq(u, &definition.inner.compilation_unit))
+                        debug_assert!(alloc::rc::Rc::ptr_eq(u, &definition.inner.compilation_unit))
                     }
                     None => unit = Some(definition.inner.compilation_unit.clone()),
                 }
@@ -1343,11 +1371,12 @@ impl CompilationResult {
             .collect();
         // The definitions are dropped by now, so the unit is only cloned when
         // the caller kept one of them, or an instance, alive.
-        let compilation_unit = unit.map(std::rc::Rc::unwrap_or_clone);
+        let compilation_unit = unit.map(alloc::rc::Rc::unwrap_or_clone);
 
         CompilationResultSend {
             compilation_unit,
             components,
+            #[cfg(feature = "compiler")]
             diagnostics,
             #[cfg(feature = "internal")]
             watch_paths,
@@ -1405,7 +1434,7 @@ impl CompilationResult {
 /// creating the instances it is safe to drop the ComponentDefinition.
 #[derive(Clone)]
 pub struct ComponentDefinition {
-    pub(crate) inner: std::rc::Rc<crate::component::ComponentDefinitionInner>,
+    pub(crate) inner: alloc::rc::Rc<crate::component::ComponentDefinitionInner>,
 }
 
 impl ComponentDefinition {
@@ -1628,7 +1657,7 @@ impl ComponentDefinition {
     }
 
     /// This gives access to the tree of Elements.
-    #[cfg(feature = "internal")]
+    #[cfg(all(feature = "internal", feature = "compiler"))]
     #[doc(hidden)]
     pub fn root_component(&self) -> Rc<i_slint_compiler::object_tree::Component> {
         self.inner
@@ -1643,7 +1672,7 @@ impl ComponentDefinition {
     ///
     /// WARNING: this is not part of the public API
     #[cfg(feature = "internal-highlight")]
-    pub fn type_loader(&self) -> std::rc::Rc<i_slint_compiler::typeloader::TypeLoader> {
+    pub fn type_loader(&self) -> alloc::rc::Rc<i_slint_compiler::typeloader::TypeLoader> {
         self.inner.type_loaders.type_loader.clone().expect(
             "TypeLoader was not retained for this ComponentDefinition (reconstructed from an instance)",
         )
@@ -1695,7 +1724,7 @@ pub struct ComponentInstance {
 impl ComponentInstance {
     /// Return the [`ComponentDefinition`] that was used to create this instance.
     pub fn definition(&self) -> ComponentDefinition {
-        ComponentDefinition { inner: std::rc::Rc::new(self.inner.definition()) }
+        ComponentDefinition { inner: alloc::rc::Rc::new(self.inner.definition()) }
     }
 
     /// Create the window and the whole item tree up front, like the generated `new()` does.
@@ -2485,8 +2514,8 @@ fn component_definition_model_properties() {
 
 #[test]
 fn lang_type_to_value_type() {
+    use alloc::collections::BTreeMap;
     use i_slint_compiler::langtype::Struct as LangStruct;
-    use std::collections::BTreeMap;
 
     assert_eq!(ValueType::from(LangType::Void), ValueType::Void);
     assert_eq!(ValueType::from(LangType::Float32), ValueType::Number);
@@ -2820,7 +2849,7 @@ export component App inherits Window {
         let imported_path = imported_path.clone();
         move |path| {
             let source = (path == imported_path).then(|| Ok(imported_code.to_owned()));
-            Box::pin(std::future::ready(source))
+            Box::pin(core::future::ready(source))
         }
     });
     let result = spin_on::spin_on(compiler.build_from_source(main_code.into(), main_path.clone()));
@@ -2890,7 +2919,7 @@ export component App inherits Window {
     .into_iter()
     .next()
     .expect("component definition");
-    let definition = ComponentDefinition { inner: std::rc::Rc::new(definition) };
+    let definition = ComponentDefinition { inner: alloc::rc::Rc::new(definition) };
 
     let repeated_offset = code.find("Rectangle {\n        x: value").unwrap();
     let matching_repeated_elements = definition
@@ -2923,6 +2952,7 @@ export component App inherits Window {
 mod project_file_tests {
 
     use super::Compiler;
+    use crate::prelude::*;
     use i_slint_compiler::project_file::FILE_NAME;
     use std::path::Path;
 
