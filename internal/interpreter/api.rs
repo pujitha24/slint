@@ -1184,7 +1184,7 @@ impl CompilationResultSend {
     #[cfg(feature = "internal-serde")]
     pub fn to_bytes(&self, _: i_slint_core::InternalToken) -> Result<Vec<u8>, String> {
         let unit = self.compilation_unit.as_ref().ok_or("The compilation produced no unit")?;
-        postcard::to_allocvec(unit)
+        i_slint_compiler::llr::serialize::to_bytes(unit)
             .map_err(|err| std::format!("Cannot serialize the compilation unit: {err}"))
     }
 
@@ -1194,7 +1194,7 @@ impl CompilationResultSend {
     #[doc(hidden)]
     #[cfg(feature = "internal-serde")]
     pub fn from_bytes(bytes: &[u8], _: i_slint_core::InternalToken) -> Result<Self, String> {
-        let unit: i_slint_compiler::llr::CompilationUnit = postcard::from_bytes(bytes)
+        let unit = i_slint_compiler::llr::serialize::from_bytes(bytes)
             .map_err(|err| std::format!("Cannot read the compilation unit: {err}"))?;
         let components = unit
             .public_components

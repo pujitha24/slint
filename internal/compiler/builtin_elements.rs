@@ -4256,9 +4256,6 @@ fn build(l: &mut Loader) {
 /// The builtin elements.
 /// A builtin [`TypeRegister`] takes them from here, so they're built once per process.
 pub(crate) struct BuiltinElements {
-    /// Every native class of the elements, sorted by name.
-    #[cfg(feature = "serde")]
-    pub native_classes: Vec<Arc<NativeClass>>,
     /// Every builtin element by name, including globals and those only accepted as a child.
     elements: HashMap<SmolStr, Arc<BuiltinElement>>,
     /// The elements accepted as a child of another one, only reachable through it.
@@ -4277,27 +4274,12 @@ pub(crate) static BUILTIN_ELEMENTS: std::sync::LazyLock<BuiltinElements> =
             context_restricted_types: HashMap::new(),
         };
         build(&mut loader);
-        #[cfg(feature = "serde")]
-        let items = std::mem::take(&mut loader.items);
         let Loader { elements, context_restricted_types, .. } = loader;
-        #[cfg(feature = "serde")]
-        let native_classes = items
-            .into_values()
-            .map(|(class, _)| class)
-            .chain(elements.values().map(|element| element.native_class.clone()))
-            .map(|class| (class.class_name.clone(), class))
-            .collect::<std::collections::BTreeMap<_, _>>();
         let children = elements
             .values()
             .flat_map(|element| element.additional_accepted_child_types.keys().cloned())
             .collect();
-        BuiltinElements {
-            #[cfg(feature = "serde")]
-            native_classes: native_classes.into_values().collect(),
-            elements,
-            children,
-            context_restricted_types,
-        }
+        BuiltinElements { elements, children, context_restricted_types }
     });
 
 impl BuiltinElements {
