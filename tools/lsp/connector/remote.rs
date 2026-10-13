@@ -183,6 +183,7 @@ impl SharedState {
 
 pub struct RemoteLspToPreview {
     shared: SharedState,
+    serial: super::serial::SerialLspToPreview,
 }
 
 impl RemoteLspToPreview {
@@ -191,6 +192,10 @@ impl RemoteLspToPreview {
         to_previews: Weak<LspToPreviews>,
     ) -> Self {
         Self {
+            serial: super::serial::SerialLspToPreview::new(
+                preview_to_lsp_sender.clone(),
+                to_previews.clone(),
+            ),
             shared: SharedState {
                 connection: Arc::default(),
                 preview_to_lsp_sender: RemotePreviewSender(preview_to_lsp_sender),
@@ -710,7 +715,11 @@ impl RemotePreviewSender {
 // recurse forever.
 impl crate::editor_preview::RemoteTransport for RemoteLspToPreview {
     fn send(&self, message: &LspToPreviewMessage) {
-        RemoteLspToPreview::send(self, message);
+        if self.serial.is_connected() {
+            self.serial.send(message);
+        } else {
+            RemoteLspToPreview::send(self, message);
+        }
     }
 
     fn connect(
@@ -718,10 +727,24 @@ impl crate::editor_preview::RemoteTransport for RemoteLspToPreview {
         addresses: Vec<String>,
         port: u16,
     ) -> Pin<Box<dyn Future<Output = crate::editor_preview::Result<()>>>> {
+        self.serial.disconnect();
         Box::pin(RemoteLspToPreview::connect(self, addresses, port))
     }
 
+    fn connect_serial(
+        &self,
+        port: String,
+    ) -> Pin<Box<dyn Future<Output = crate::editor_preview::Result<()>>>> {
+        let disconnected = RemoteLspToPreview::disconnect(self);
+        self.serial.connect(port);
+        Box::pin(async move {
+            disconnected.await;
+            Ok(())
+        })
+    }
+
     fn disconnect(&self) -> Pin<Box<dyn Future<Output = ()>>> {
+        self.serial.disconnect();
         Box::pin(RemoteLspToPreview::disconnect(self))
     }
 
