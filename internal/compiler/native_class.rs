@@ -26,6 +26,7 @@ pub enum BuiltinPropertyDefault {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PropertyVisibility {
     #[default]
     Private,

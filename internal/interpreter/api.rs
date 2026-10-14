@@ -1177,6 +1177,39 @@ const _: () = {
 };
 
 impl CompilationResultSend {
+    /// This is an internal function without API stability guarantees.
+    /// The compilation unit, serialized for [`Self::from_bytes()`].
+    /// Fails if the compilation produced no unit.
+    #[doc(hidden)]
+    #[cfg(feature = "internal-serde")]
+    pub fn to_bytes(&self, _: i_slint_core::InternalToken) -> Result<Vec<u8>, String> {
+        let unit = self.compilation_unit.as_ref().ok_or("The compilation produced no unit")?;
+        postcard::to_allocvec(unit)
+            .map_err(|err| std::format!("Cannot serialize the compilation unit: {err}"))
+    }
+
+    /// This is an internal function without API stability guarantees.
+    /// A result holding the unit serialized by [`Self::to_bytes()`], possibly in another
+    /// process, with neither diagnostics nor watch paths.
+    #[doc(hidden)]
+    #[cfg(feature = "internal-serde")]
+    pub fn from_bytes(bytes: &[u8], _: i_slint_core::InternalToken) -> Result<Self, String> {
+        let unit: i_slint_compiler::llr::CompilationUnit = postcard::from_bytes(bytes)
+            .map_err(|err| std::format!("Cannot read the compilation unit: {err}"))?;
+        let components = unit
+            .public_components
+            .iter_enumerated()
+            .map(|(public_index, component)| (component.name.to_string(), public_index))
+            .collect();
+        Ok(Self {
+            compilation_unit: Some(unit),
+            components,
+            diagnostics: Vec::new(),
+            watch_paths: Vec::new(),
+            structs_and_enums: Vec::new(),
+        })
+    }
+
     /// Returns true if the compilation failed.
     pub fn has_errors(&self) -> bool {
         self.diagnostics.iter().any(|d| d.level() == DiagnosticLevel::Error)
@@ -2705,47 +2738,57 @@ export component App inherits Window {
     let path = PathBuf::from("/virtual/round-trip.slint");
     let result = spin_on::spin_on(Compiler::default().build_from_source(code.into(), path.clone()));
     assert!(!result.has_errors(), "{:?}", result.diagnostics().collect::<Vec<_>>());
-    let result = CompilationResult::from(result.into_send());
-    let instance = result.component("App").unwrap().create().unwrap();
+    let send = result.into_send();
+    #[cfg(feature = "internal-serde")]
+    let bytes = send.to_bytes(i_slint_core::InternalToken).unwrap();
+    let mut results = vec![CompilationResult::from(send)];
+    #[cfg(feature = "internal-serde")]
+    results.push(CompilationResult::from(
+        CompilationResultSend::from_bytes(&bytes, i_slint_core::InternalToken).unwrap(),
+    ));
+    for result in results {
+        let instance = result.component("App").unwrap().create().unwrap();
 
-    let positions_at = |pattern: &str, inside_pattern: usize| {
-        let offset = code.find(pattern).unwrap() + inside_pattern;
-        instance.component_positions(&SourcePath::new(&path), offset as u32)
-    };
+        let positions_at = |pattern: &str, inside_pattern: usize| {
+            let offset = code.find(pattern).unwrap() + inside_pattern;
+            instance.component_positions(&SourcePath::new(&path), offset as u32)
+        };
 
-    let first = positions_at("Derived { x: 10px", 2);
-    assert_eq!(first.len(), 1, "{first:?}");
-    assert_eq!(first[0].rect.origin, euclid::point2(10., 20.));
-    let second = positions_at("Derived { x: 200px", 2);
-    assert_eq!(second.len(), 1, "{second:?}");
-    assert_eq!(second[0].rect.origin, euclid::point2(200., 100.));
+        let first = positions_at("Derived { x: 10px", 2);
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert_eq!(first[0].rect.origin, euclid::point2(10., 20.));
+        let second = positions_at("Derived { x: 200px", 2);
+        assert_eq!(second.len(), 1, "{second:?}");
+        assert_eq!(second[0].rect.origin, euclid::point2(200., 100.));
 
-    let definition = positions_at("Rectangle {\n    width: 50px", 3);
-    assert_eq!(definition.len(), 6, "{definition:?}");
+        let definition = positions_at("Rectangle {\n    width: 50px", 3);
+        assert_eq!(definition.len(), 6, "{definition:?}");
 
-    let conditional_offset = code.find("Rectangle {\n        x: 100px").unwrap() as u32 + 4;
-    let conditional = instance.component_positions(&SourcePath::new(&path), conditional_offset);
-    assert_eq!(conditional.len(), 1, "{conditional:?}");
-    assert_eq!(conditional[0].rect.origin, euclid::point2(100., 200.));
+        let conditional_offset = code.find("Rectangle {\n        x: 100px").unwrap() as u32 + 4;
+        let conditional = instance.component_positions(&SourcePath::new(&path), conditional_offset);
+        assert_eq!(conditional.len(), 1, "{conditional:?}");
+        assert_eq!(conditional[0].rect.origin, euclid::point2(100., 200.));
 
-    let optimized = positions_at("Rectangle {\n        x: 300px", 3);
-    let redundant = positions_at("Rectangle { }", 3);
-    assert_eq!(optimized.len(), 1, "{optimized:?}");
-    assert_eq!(redundant.len(), 1, "{redundant:?}");
-    assert_eq!(redundant[0].rect, optimized[0].rect);
+        let optimized = positions_at("Rectangle {\n        x: 300px", 3);
+        let redundant = positions_at("Rectangle { }", 3);
+        assert_eq!(optimized.len(), 1, "{optimized:?}");
+        assert_eq!(redundant.len(), 1, "{redundant:?}");
+        assert_eq!(redundant[0].rect, optimized[0].rect);
 
-    let assert_repeated_positions = |mut positions: Vec<crate::highlight::HighlightedRect>,
-                                     expected_x_positions| {
-        positions.sort_by(|left, right| left.rect.origin.x.total_cmp(&right.rect.origin.x));
-        assert_eq!(positions.len(), 2, "{positions:?}");
-        for (geometry, expected_x) in positions.iter().zip(expected_x_positions) {
-            assert_eq!(geometry.rect.origin, euclid::point2(expected_x, 250.));
+        let assert_repeated_positions =
+            |mut positions: Vec<crate::highlight::HighlightedRect>, expected_x_positions| {
+                positions.sort_by(|left, right| left.rect.origin.x.total_cmp(&right.rect.origin.x));
+                assert_eq!(positions.len(), 2, "{positions:?}");
+                for (geometry, expected_x) in positions.iter().zip(expected_x_positions) {
+                    assert_eq!(geometry.rect.origin, euclid::point2(expected_x, 250.));
+                }
+            };
+        for (pattern, expected_x_positions) in [
+            ("Derived {\n        x: column", [0., 60.]),
+            ("Derived {\n        x: 150px", [150., 210.]),
+        ] {
+            assert_repeated_positions(positions_at(pattern, 2), expected_x_positions);
         }
-    };
-    for (pattern, expected_x_positions) in
-        [("Derived {\n        x: column", [0., 60.]), ("Derived {\n        x: 150px", [150., 210.])]
-    {
-        assert_repeated_positions(positions_at(pattern, 2), expected_x_positions);
     }
 }
 
