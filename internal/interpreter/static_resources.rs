@@ -20,6 +20,68 @@ use i_slint_core::slice::Slice;
 i_slint_core::thread_local! {
     static TEXTURES: RefCell<Vec<(u64, &'static StaticTextures)>> = RefCell::default();
     static FONTS: RefCell<Vec<(u64, &'static BitmapFont)>> = RefCell::default();
+    static REGISTERED: RefCell<alloc::collections::BTreeMap<u64, Registered>> =
+        RefCell::default();
+}
+
+/// An embedded resource in the form the renderer takes it, see [`register()`].
+#[derive(Clone, Copy)]
+pub enum Registered {
+    Texture(&'static StaticTextures),
+    BitmapFont(&'static BitmapFont),
+    /// A resource that the unit doesn't carry.
+    None,
+}
+
+/// Converts the embedded resource serialized in `bytes` by
+/// `i_slint_compiler::llr::serialize::to_parts()` into the form the renderer takes,
+/// and keeps it under `key` for [`registered()`].
+/// Nothing is converted if `key` is known already.
+#[cfg(feature = "internal-serde")]
+pub fn register(key: u64, bytes: &[u8]) -> Result<(), String> {
+    if registered(key).is_some() {
+        return Ok(());
+    }
+    let resource = i_slint_compiler::llr::serialize::resource_from_bytes(bytes)
+        .map_err(|err| alloc::format!("Cannot read an image or font of the design: {err}"))?;
+    let registered = match &resource {
+        unit::EmbeddedResource::Texture(texture) => Registered::Texture(static_textures(texture)),
+        unit::EmbeddedResource::BitmapFont(font) => Registered::BitmapFont(bitmap_font(font)),
+        unit::EmbeddedResource::NotInUnit | unit::EmbeddedResource::Registered(_) => {
+            Registered::None
+        }
+    };
+    REGISTERED.with(|r| r.borrow_mut().insert(key, registered));
+    Ok(())
+}
+
+/// The resource [`register()`] keeps under `key`.
+pub fn registered(key: u64) -> Option<Registered> {
+    REGISTERED.with(|r| r.borrow().get(&key).copied())
+}
+
+/// The texture that `resource` is, or refers to.
+pub fn texture_of(resource: &unit::EmbeddedResource) -> Option<&'static StaticTextures> {
+    match resource {
+        unit::EmbeddedResource::Texture(texture) => Some(static_textures(texture)),
+        unit::EmbeddedResource::Registered(key) => match registered(*key)? {
+            Registered::Texture(texture) => Some(texture),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The bitmap font that `resource` is, or refers to.
+pub fn bitmap_font_of(resource: &unit::EmbeddedResource) -> Option<&'static BitmapFont> {
+    match resource {
+        unit::EmbeddedResource::BitmapFont(font) => Some(bitmap_font(font)),
+        unit::EmbeddedResource::Registered(key) => match registered(*key)? {
+            Registered::BitmapFont(font) => Some(font),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// The texture as the renderer takes it, leaked the first time its content is seen.
@@ -284,4 +346,44 @@ fn the_same_resources_are_leaked_once() {
     let first = fonts(&units[0]);
     assert!(!first.is_empty());
     assert_eq!(first, fonts(&units[1]));
+}
+
+#[cfg(all(test, feature = "internal-serde", feature = "internal-embed-textures"))]
+#[test]
+fn a_unit_reads_back_from_its_parts() {
+    let compile = || {
+        let mut compiler = crate::Compiler::default();
+        compiler.set_embed_resources(crate::EmbedResourcesKind::EmbedTextures);
+        let result = spin_on::spin_on(compiler.build_from_source(
+            "export component Live inherits Window { Text { text: \"Parts\"; font-size: 32px; } }"
+                .into(),
+            Default::default(),
+        ));
+        assert!(!result.has_errors(), "{:?}", result.diagnostics().collect::<Vec<_>>());
+        result.into_send()
+    };
+    let token = || i_slint_core::InternalToken;
+    let (unit, resources) = compile().into_parts(token()).unwrap();
+    let keys: Vec<u64> = (0..resources.len() as u64).map(|i| 0x5eed_0000 + i).collect();
+    assert!(crate::CompilationResultSend::from_parts(&unit, &keys, token()).is_err());
+
+    for (key, bytes) in keys.iter().zip(&resources) {
+        crate::CompilationResultSend::register_resource(*key, bytes, token()).unwrap();
+    }
+    let restored = crate::CompilationResultSend::from_parts(&unit, &keys, token()).unwrap();
+    let restored: crate::CompilationResult = restored.into();
+    assert!(restored.component("Live").is_some());
+
+    // The registered font is the one the whole unit gets
+    let whole = compile().to_bytes(token()).unwrap();
+    let whole = i_slint_compiler::llr::serialize::from_bytes(&whole).unwrap();
+    let font = whole.embedded_resources.iter().find_map(bitmap_font_of).unwrap();
+    let registered_fonts: Vec<_> = keys
+        .iter()
+        .filter_map(|key| match registered(*key) {
+            Some(Registered::BitmapFont(font)) => Some(font as *const BitmapFont),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(registered_fonts, [font as *const _]);
 }

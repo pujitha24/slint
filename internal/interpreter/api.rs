@@ -1226,19 +1226,76 @@ impl CompilationResultSend {
     pub fn from_bytes(bytes: &[u8], _: i_slint_core::InternalToken) -> Result<Self, String> {
         let unit = i_slint_compiler::llr::serialize::from_bytes(bytes)
             .map_err(|err| alloc::format!("Cannot read the compilation unit: {err}"))?;
+        Ok(Self::from_unit(unit))
+    }
+
+    /// This is an internal function without API stability guarantees.
+    /// The compilation unit serialized for [`Self::from_parts()`]: the unit, and each of
+    /// its embedded resources on its own, so that a receiver can keep those it has.
+    /// Fails if the compilation produced no unit.
+    #[doc(hidden)]
+    #[cfg(feature = "internal-serde")]
+    pub fn into_parts(
+        self,
+        _: i_slint_core::InternalToken,
+    ) -> Result<(Vec<u8>, Vec<Vec<u8>>), String> {
+        let unit = self.compilation_unit.ok_or("The compilation produced no unit")?;
+        i_slint_compiler::llr::serialize::to_parts(unit)
+            .map_err(|err| alloc::format!("Cannot serialize the compilation unit: {err}"))
+    }
+
+    /// This is an internal function without API stability guarantees.
+    /// Converts one of the embedded resources serialized by [`Self::into_parts()`] into the
+    /// form the renderer takes, and keeps it under `key` for [`Self::from_parts()`].
+    /// Only the converted form stays in memory, until the program ends.
+    /// Nothing is converted if `key` is known already.
+    #[doc(hidden)]
+    #[cfg(feature = "internal-serde")]
+    pub fn register_resource(
+        key: u64,
+        bytes: &[u8],
+        _: i_slint_core::InternalToken,
+    ) -> Result<(), String> {
+        crate::static_resources::register(key, bytes)
+    }
+
+    /// This is an internal function without API stability guarantees.
+    /// A result holding the unit serialized by [`Self::into_parts()`], like
+    /// [`Self::from_bytes()`], with the embedded resources registered under `resource_keys`
+    /// with [`Self::register_resource()`], in order.
+    #[doc(hidden)]
+    #[cfg(feature = "internal-serde")]
+    pub fn from_parts(
+        unit: &[u8],
+        resource_keys: &[u64],
+        _: i_slint_core::InternalToken,
+    ) -> Result<Self, String> {
+        if let Some(key) =
+            resource_keys.iter().find(|key| crate::static_resources::registered(**key).is_none())
+        {
+            return Err(alloc::format!("The image or font {key:x} of the design is missing"));
+        }
+        let unit =
+            i_slint_compiler::llr::serialize::from_parts(unit, resource_keys.iter().copied())
+                .map_err(|err| alloc::format!("Cannot read the compilation unit: {err}"))?;
+        Ok(Self::from_unit(unit))
+    }
+
+    #[cfg(feature = "internal-serde")]
+    fn from_unit(unit: i_slint_compiler::llr::CompilationUnit) -> Self {
         let components = unit
             .public_components
             .iter_enumerated()
             .map(|(public_index, component)| (component.name.to_string(), public_index))
             .collect();
-        Ok(Self {
+        Self {
             compilation_unit: Some(unit),
             components,
             #[cfg(feature = "compiler")]
             diagnostics: Vec::new(),
             watch_paths: Vec::new(),
             structs_and_enums: Vec::new(),
-        })
+        }
     }
 
     /// Returns true if the compilation failed.

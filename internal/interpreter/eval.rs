@@ -1824,16 +1824,18 @@ fn load_image_reference(
         // Without the compiler, only the images it embedded in the unit show
         #[cfg(not(feature = "compiler"))]
         Ref::DataUri(_) | Ref::Source(_) => Err(Default::default()),
-        Ref::EmbeddedTexture { resource_id } => match unit.embedded_resources.get(*resource_id) {
-            Some(i_slint_compiler::embedded_resources::EmbeddedResource::Texture(texture)) => {
-                Ok(i_slint_core::graphics::Image::from(
-                    i_slint_core::graphics::ImageInner::StaticTextures(
-                        crate::static_resources::static_textures(texture),
-                    ),
-                ))
+        Ref::EmbeddedTexture { resource_id } => {
+            match unit
+                .embedded_resources
+                .get(*resource_id)
+                .and_then(crate::static_resources::texture_of)
+            {
+                Some(texture) => Ok(i_slint_core::graphics::Image::from(
+                    i_slint_core::graphics::ImageInner::StaticTextures(texture),
+                )),
+                None => Err(Default::default()),
             }
-            _ => Err(Default::default()),
-        },
+        }
         Ref::EmbeddedData { .. } => Ok(Default::default()),
     };
     image.unwrap_or_else(|_| {
@@ -2457,19 +2459,17 @@ fn call_builtin_function(
         }
         BuiltinFunction::RegisterBitmapFont => {
             if let [Expression::NumberLiteral(resource_id)] = arguments
-                && let Some(i_slint_compiler::embedded_resources::EmbeddedResource::BitmapFont(
-                    font,
-                )) = ctx.compilation_unit.embedded_resources.get(
-                    i_slint_compiler::embedded_resources::EmbeddedResourcesIdx(
+                && let Some(font) = ctx
+                    .compilation_unit
+                    .embedded_resources
+                    .get(i_slint_compiler::embedded_resources::EmbeddedResourcesIdx(
                         *resource_id as usize,
-                    ),
-                )
+                    ))
+                    .and_then(crate::static_resources::bitmap_font_of)
                 && let Some(root) = find_root_instance(ctx)
             {
                 match root.try_window_adapter() {
-                    Ok(adapter) => adapter
-                        .renderer()
-                        .register_bitmap_font(crate::static_resources::bitmap_font(font)),
+                    Ok(adapter) => adapter.renderer().register_bitmap_font(font),
                     Err(err) => i_slint_core::debug_log!("Cannot register bitmap font: {err}"),
                 }
             }
